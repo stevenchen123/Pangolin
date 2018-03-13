@@ -50,9 +50,8 @@ void SigPipeHandler(int sig)
     SigState::I().sig_callbacks.at(sig).value = true;
 }
 
-PangoVideoOutput::PangoVideoOutput(const std::string& filename, size_t buffer_size_bytes, const std::map<size_t, std::string> &stream_encoder_uris)
+PangoVideoOutput::PangoVideoOutput(const std::string& filename, const std::map<size_t, std::string> &stream_encoder_uris)
     : filename(filename),
-      packetstream_buffer_size_bytes(buffer_size_bytes),
       packetstreamsrcid(-1),
       total_frame_size(0),
       is_pipe(pangolin::IsPipe(filename)),
@@ -61,7 +60,7 @@ PangoVideoOutput::PangoVideoOutput(const std::string& filename, size_t buffer_si
 {
     if(!is_pipe)
     {
-        packetstream.Open(filename, packetstream_buffer_size_bytes);
+        packetstream.Open(filename);
     }
     else
     {
@@ -168,7 +167,7 @@ int PangoVideoOutput::WriteStreams(const unsigned char* data, const picojson::va
         {
             if (fd != -1)
             {
-                packetstream.Open(filename, packetstream_buffer_size_bytes);
+                packetstream.Open(filename);
                 close(fd);
             }
         }
@@ -233,8 +232,6 @@ PANGOLIN_REGISTER_FACTORY(PangoVideoOutput)
 {
     struct PangoVideoFactory : public FactoryInterface<VideoOutputInterface> {
         std::unique_ptr<VideoOutputInterface> Open(const Uri& uri) override {
-            const size_t mb = 1024*1024;
-            const size_t buffer_size_bytes = uri.Get("buffer_size_mb", 100) * mb;
             std::string filename = uri.url;
 
             if(uri.Contains("unique_filename")) {
@@ -257,7 +254,7 @@ PANGOLIN_REGISTER_FACTORY(PangoVideoOutput)
             }
 
             return std::unique_ptr<VideoOutputInterface>(
-                new PangoVideoOutput(filename, buffer_size_bytes, stream_encoder_uris)
+                new PangoVideoOutput(filename, stream_encoder_uris)
             );
         }
     };

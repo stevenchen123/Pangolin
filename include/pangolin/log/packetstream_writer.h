@@ -26,6 +26,8 @@
 #pragma once
 
 #include <ostream>
+#include <queue>
+#include <atomic>
 
 #include <pangolin/log/packetstream.h>
 #include <pangolin/log/packetstream_source.h>
@@ -35,59 +37,23 @@
 namespace pangolin
 {
 
+// PacketStreamWriter represents a thread-safe class for writing multiplexed
+// packets from different sources to disk.
 class PANGOLIN_EXPORT PacketStreamWriter
 {
 public:
-    PacketStreamWriter()
-        : _stream(&_buffer), _indexable(false), _open(false), _bytes_written(0)
-    {
-        _stream.exceptions(std::ostream::badbit);
-    }
+    PacketStreamWriter();
 
-    PacketStreamWriter(const std::string& filename, size_t buffer_size  = 100*1024*1024)
-        : _buffer(pangolin::PathExpand(filename), buffer_size), _stream(&_buffer),
-          _indexable(!IsPipe(filename)), _open(_stream.good()), _bytes_written(0)
-    {
-        _stream.exceptions(std::ostream::badbit);
-        WriteHeader();
-    }
+    PacketStreamWriter(const std::string& filename);
 
-    ~PacketStreamWriter() {
-        Close();
-    }
+    ~PacketStreamWriter();
 
-    void Open(const std::string& filename, size_t buffer_size = 100 * 1024 * 1024)
-    {
-        Close();
-        _buffer.open(filename, buffer_size);
-        _open = _stream.good();
-        _bytes_written = 0;
-        _indexable = !IsPipe(filename);
-        WriteHeader();
-    }
+    void Open(const std::string& filename);
 
-    void Close()
-    {
-        if (_open)
-        {
-            if (_indexable) {
-                WriteEnd();
-            }
-            _buffer.close();
-            _open = false;
-        }
-    }
+    void Close();
 
     // Does not write footer or index.
-    void ForceClose()
-    {
-        if (_open)
-        {
-        _buffer.force_close();
-        Close();
-        }
-    }
-
+    void ForceClose();
 
     // Writes to the stream immediately upon add. Return source id # and writes
     // source id # to argument struct
@@ -101,73 +67,63 @@ public:
         size_t sourcelen, const picojson::value& meta = picojson::value()
     );
 
-    // For stream read/write synchronization. Note that this is NOT the same as
-    // time synchronization on playback of iPacketStreams.
-    void WriteSync();
-
-    // Writes the end of the stream data, including the index. Does NOT close
-    // the underlying ostream.
-    void WriteEnd();
 
     const std::vector<PacketStreamSource>& Sources() const {
         return _sources;
     }
 
     bool IsOpen() const {
-        return _open;
+        return _stream.is_open();
     }
 
 private:
-    void WriteHeader();
-    void Write(const PacketStreamSource&);
-    void WriteMeta(PacketStreamSourceId src, const picojson::value& data);
+    using Buffer = std::vector<char>;
 
-    threadedfilebuf _buffer;
-    std::ostream _stream;
-    bool _indexable, _open;
+    static void BufferHeader(Buffer& writer);
+    static void BufferCompressedUnsignedInt(Buffer& writer, size_t n);
+    static void BufferTag(Buffer& writer, const pangoTagType tag);
+    static void BufferSourceDescription(Buffer& writer, const PacketStreamSource& source);
+
+    template<typename T>
+    static void BufferArg(Buffer& writer, const T& v);
+
+    // Returns a free buffer from the buffer pool
+    Buffer GetWriteBuffer();
+    // Submit a buffer to be written to the stream
+    void SubmitWriteBuffer(Buffer&& b);
+    // Return a buffer to the buffer pool for future use
+    void PutWriteBuffer(Buffer&& b);
+
+    // For stream read/write synchronization. Note that this is NOT the same as
+    // time synchronization on playback of iPacketStreams.
+    void WriteSyncToStream();
+
+    // Writes the end of the stream data, including the index. Does NOT close
+    // the underlying ostream.
+    void WriteEndToStream();
+
+    void WriteLoop();
+
+    std::ofstream _stream;
+    bool _indexable;
 
     std::vector<PacketStreamSource> _sources;
     size_t _bytes_written;
     std::recursive_mutex _lock;
+
+    // Single thread handling io
+    std::thread write_thread;
+    std::atomic<bool> should_run;
+
+    // queue of data to write
+    std::deque<Buffer> to_write;
+
+    // queue of spare pre-allocated buffers
+    std::vector<Buffer> alloc_pool;
+
+    std::mutex queue_write_mutex;
+    std::mutex queue_pool_mutex;
+    std::condition_variable queue_add_cond;
 };
-
-inline void writeCompressedUnsignedInt(std::ostream& writer, size_t n)
-{
-    while (n >= 0x80)
-    {
-    writer.put(0x80 | (n & 0x7F));
-    n >>= 7;
-    }
-    writer.put(static_cast<unsigned char>(n));
-}
-
-inline void writeTimestamp(std::ostream& writer, int64_t time_us)
-{
-    writer.write(reinterpret_cast<const char*>(&time_us), sizeof(decltype(time_us)));
-}
-
-inline void writeTag(std::ostream& writer, const pangoTagType tag)
-{
-    writer.write(reinterpret_cast<const char*>(&tag), TAG_LENGTH);
-}
-
-inline picojson::value SourceStats(const std::vector<PacketStreamSource>& srcs)
-{
-    picojson::value stat;
-    stat["num_sources"] = srcs.size();
-    stat["src_packet_index"] = picojson::array();
-    stat["src_packet_times"] = picojson::array();
-
-    for(auto& src : srcs) {
-        picojson::array pkt_index, pkt_times;
-        for (const PacketStreamSource::PacketInfo& frame : src.index) {
-            pkt_index.emplace_back(frame.pos);
-            pkt_times.emplace_back(frame.capture_time);
-        }
-        stat["src_packet_index"].push_back(std::move(pkt_index));
-        stat["src_packet_times"].push_back(std::move(pkt_times));
-    }
-    return stat;
-}
 
 }

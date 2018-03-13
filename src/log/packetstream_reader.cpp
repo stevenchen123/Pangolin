@@ -347,18 +347,18 @@ void PacketStreamReader::AppendIndex()
 {
     lock_guard<decltype(_mutex)> lg(_mutex);
 
-    if(_stream.seekable()) {
-        // Open file again for append
-        std::ofstream of(_filename, std::ios::app | std::ios::binary);
-        if(of.is_open()) {
-            pango_print_warn("Appending new index to '%s'.\n", _filename.c_str());
-            uint64_t indexpos = (uint64_t)of.tellp();
-            writeTag(of, TAG_PANGO_STATS);
-            SourceStats(_sources).serialize(std::ostream_iterator<char>(of), false);
-            writeTag(of, TAG_PANGO_FOOTER);
-            of.write(reinterpret_cast<char*>(&indexpos), sizeof(uint64_t));
-        }
-    }
+//    if(_stream.seekable()) {
+//        // Open file again for append
+//        std::ofstream of(_filename, std::ios::app | std::ios::binary);
+//        if(of.is_open()) {
+//            pango_print_warn("Appending new index to '%s'.\n", _filename.c_str());
+//            uint64_t indexpos = (uint64_t)of.tellp();
+//            writeTag(of, TAG_PANGO_STATS);
+//            SourceStats(_sources).serialize(std::ostream_iterator<char>(of), false);
+//            writeTag(of, TAG_PANGO_FOOTER);
+//            of.write(reinterpret_cast<char*>(&indexpos), sizeof(uint64_t));
+//        }
+//    }
 }
 
 void PacketStreamReader::FixFileIndex()
